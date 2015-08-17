@@ -70,12 +70,24 @@ function D = nnfactory(datadim, num)
     function store = intermediate_func(theta, data, store)
         
         if ~isfield(store, 'Wxb')
-            store.Wxb = bsxfun(@plus, theta.W.' * data(1:end-1,:), theta.b);
+            store.Wxb = bsxfun(@plus, theta.W.' * data(1:datadim,:), theta.b);
             store.tWxb = tanh(store.Wxb);
             store.htWxb = theta.h.' * store.tWxb + theta.s;
-            store.e = store.htWxb - data(end,:);
+            if size(data,2) > datadim
+                store.e = store.htWxb - data(end,:);
+            end
         end
         
+    end
+%% |predict|
+% Predicting the output vector from input data
+    D.predict = @predict;
+    function y = predict(theta, data)
+         data = mxe_readdata(data);
+         data = data.data;
+         store = struct;
+         store = intermediate_func(theta, data, store);
+         y = store.htWxb;
     end
 
 %% |ll|
@@ -172,9 +184,21 @@ function D = nnfactory(datadim, num)
 % See <doc_distribution_common.html#13 distribution structure common members>.
 
     D.init = @init;
-    function theta = init(data, varargin)
-        
-        theta = estimatedefault(data);
+    function [theta] = init(data)
+        % Nugyen-Widrow Method 
+        data = mxe_readdata(data);
+        data = data.data;
+        if all(max(data,[],2)==1) && all(min(data,[],2)==-1)
+            normW = 0.7 * num ^ (1/datadim);
+            theta.W = rand(datadim, num);
+            theta.W = bsxfun(@times,theta.W, normW./sum(theta.W,1));
+            theta.b = normW * rand(num, 1);
+            % Other patameters is uniform between [-0.5, 0.5]
+            theta.s = rand(1)-0.5;
+            theta.h = rand(num,1) - 0.5;
+        else
+            error('Data should be normalized between [-1,1]');
+        end
     end
 
 %% |estimatedefault|
