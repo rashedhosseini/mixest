@@ -1,13 +1,14 @@
-%% |nnfactory|
+%% |nnpinballfactory|
 % Construct a neural network distribution structure
+% Cost is pinball instead of MSE
 %
 % *Syntax*
 %
-%   D = nnfactory(datadim, num)
+%   D = nnpinballfactory(datadim, num, ratio)
 %
 % *Description*
 %
-% |D = nnfactory(num)| returns a structure representing a nnet with
+% |D = nnpinballfactory(num)| returns a structure representing a nnet with
 %  |num| number of hidden units and |datadim| dimensionality of input 
 %
 % *Distribution Parameters*
@@ -36,16 +37,23 @@
 % Change log: 
 %
 
-function D = nnfactory(datadim, num)
+function D = nnpinballfactory(datadim, num, ratio)
 
 %% |name|
 % See <doc_distribution_common.html#1 distribution structure common members>.
 
-    D.name = @() 'nnet';
+    D.name = @() 'nnetpinball';
 
 %%
 
     assert(datadim >= 1, 'datadim must be an integer larger than or equal to 1.');
+    
+%%
+    
+    if nargin < 3
+       ratio = 0.1; % For avoiding underfitting use ratio smaller than 0.5 
+    end
+    alpha = 50;
 
 %% |M|
 % See <doc_distribution_common.html#2 distribution structure common members>.
@@ -65,6 +73,35 @@ function D = nnfactory(datadim, num)
 % See <doc_distribution_common.html#4 distribution structure common members>.
 
     D.datadim = @() datadim; % data space dimensions
+
+%%
+    function store = pinball_func(store)
+        x = store.e;
+        a = alpha;
+        k = ratio;
+        ind1 = x > 100/a;
+        y1 = x + 1/a * log( 1 + exp(-a*x) );
+        y1(ind1) = x(ind1);
+        ind2 = x < -100/a;
+        y2 = -x + 1/a * log( 1 + exp(a*x) );
+        y2(ind2) = -x(ind2);
+        y = k*y1+(1-k)*y2;
+        store.eo = y;
+    end
+
+    function store = pinball_funcgrad(store)
+        x = store.e;
+        a = alpha;
+        k = ratio;
+        ind1 = x > 100/a;
+        ind2 = x < -100/a;
+        dy1 = 1 - 1./(1 + exp(a*x));  %1 - exp(-a*x)/(1 + exp(-a*x))
+        dy1(ind1) = 1;
+        dy2 = -1 + 1./(1 + exp(-a*x));
+        dy2(ind2) = -1;
+        dy = k*dy1 + (1-k)*dy2;
+        store.deo = dy;
+    end
 
 %%
     function store = intermediate_func(theta, data, store)
@@ -93,6 +130,20 @@ function D = nnfactory(datadim, num)
 %% |ll|
 % See <doc_distribution_common.html#5 distribution structure common members>.
 
+    D.ll = @ll;
+    function [ll, store] = ll(theta, data, store)
+        
+        if nargin < 3
+            store = struct;
+        end
+        
+        [llvec, store] = D.llvec(theta, data, store);
+
+        % Calculate the log-likelihood
+        ll = sum(llvec);
+        
+    end
+
 %% |llvec|
 % See <doc_distribution_common.html#6 distribution structure common members>.
 
@@ -109,8 +160,10 @@ function D = nnfactory(datadim, num)
         data = data.data;
         
         store = intermediate_func(theta, data, store);
+        store = pinball_func(store);
         
-        llvec = - 0.5 * store.e.^2;            
+        llvec = - store.eo;    %0.5 * store.e.^2;  
+        
         if ~isempty(weight)
             llvec = weight .* llvec;
         end
@@ -132,12 +185,13 @@ function D = nnfactory(datadim, num)
         data = data.data;
         
         store = intermediate_func(theta, data, store);
+        store = pinball_funcgrad(store);
 
         % gradient with respect to sigma
         if isempty(weight)
-            err = store.e;
+            err = store.deo; %store.e;
         else
-            err = store.e .* weight;
+            err = store.deo .* weight; %store.e .* weight;
         end
         
         dll.h = - sum(bsxfun(@times,store.tWxb, err), 2);
@@ -146,6 +200,7 @@ function D = nnfactory(datadim, num)
         ercWxb = bsxfun(@times, err, cWxb);
         dll.b = - theta.h .* sum(ercWxb,2);
         dll.W = - bsxfun(@times, theta.h.', data(1:end-1,:) * ercWxb.');
+        %theta.h.' * sum(bsxfun(@times, cWxb.*er, data(1:end-1,:)),2).';
         
     end
 
@@ -205,8 +260,24 @@ function D = nnfactory(datadim, num)
 %% |sumparam|
 % See <doc_distribution_common.html#18 distribution structure common members>.
 
+    D.sumparam = @sumparam;
+    function theta = sumparam(theta1, theta2)
+        theta.W = theta1.W + theta2.W;
+        theta.b = theta1.b + theta2.b;
+        theta.h = theta1.h + theta2.h;
+        theta.s = theta1.s + theta2.s;
+    end
+
 %% |scaleparam|
 % See <doc_distribution_common.html#19 distribution structure common members>.
+
+    D.scaleparam = @scaleparam;
+    function theta = scaleparam(scalar, theta)
+        theta.W = scalar * theta.W;
+        theta.b = scalar * theta.b;
+        theta.h = scalar * theta.h;
+        theta.s = scalar * theta.s;
+    end
 
 %% |sumgrad|
 % See <doc_distribution_common.html#20 distribution structure common members>.
