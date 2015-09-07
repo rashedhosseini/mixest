@@ -37,20 +37,20 @@
 % Change log: 
 %
 
-function D = nnpinballfactory(datadim, num, ratio)
+function D = nnpinballfactory(datadim, num, datatrain, ratio)
 
 %% |name|
 % See <doc_distribution_common.html#1 distribution structure common members>.
 
     D.name = @() 'nnetpinball';
-
+    param_n = normalize_param(datatrain);
 %%
 
     assert(datadim >= 1, 'datadim must be an integer larger than or equal to 1.');
     
 %%
     
-    if nargin < 3
+    if nargin < 4
        ratio = 0.1; % For avoiding underfitting use ratio smaller than 0.5 
     end
     alpha = 50;
@@ -122,9 +122,10 @@ function D = nnpinballfactory(datadim, num, ratio)
     function y = predict(theta, data)
          data = mxe_readdata(data);
          data = data.data;
+         data = normalize_data(data, param_n);
          store = struct;
          store = intermediate_func(theta, data, store);
-         y = store.htWxb;
+         y = denormalize_data(store.htWxb, param_n, datadim+1);
     end
 
 %% |ll|
@@ -158,6 +159,7 @@ function D = nnpinballfactory(datadim, num, ratio)
         
         weight = data.weight;
         data = data.data;
+        data = normalize_data(data, param_n);
         
         store = intermediate_func(theta, data, store);
         store = pinball_func(store);
@@ -183,7 +185,8 @@ function D = nnpinballfactory(datadim, num, ratio)
         
         weight = data.weight;
         data = data.data;
-        
+        data = normalize_data(data, param_n);
+
         store = intermediate_func(theta, data, store);
         store = pinball_funcgrad(store);
 
@@ -226,19 +229,19 @@ function D = nnpinballfactory(datadim, num, ratio)
     D.init = @init;
     function [theta] = init(data)
         % Nugyen-Widrow Method 
-        data = mxe_readdata(data);
-        data = data.data;
-        if all(max(data,[],2)==1) && all(min(data,[],2)==-1)
-            normW = 0.7 * num ^ (1/datadim);
-            theta.W = rand(datadim, num);
-            theta.W = bsxfun(@times,theta.W, normW./sum(theta.W,1));
-            theta.b = normW * rand(num, 1);
-            % Other patameters is uniform between [-0.5, 0.5]
-            theta.s = rand(1)-0.5;
-            theta.h = rand(num,1) - 0.5;
-        else
-            error('Data should be normalized between [-1,1]');
-        end
+        %data = mxe_readdata(data);
+        %data = data.data;
+        %if all(max(data,[],2)==1) && all(min(data,[],2)==-1)
+        normW = 0.7 * num ^ (1/datadim);
+        theta.W = rand(datadim, num);
+        theta.W = bsxfun(@times,theta.W, normW./sum(theta.W,1));
+        theta.b = normW * rand(num, 1);
+        % Other patameters is uniform between [-0.5, 0.5]
+        theta.s = rand(1)-0.5;
+        theta.h = rand(num,1) - 0.5;
+        %else
+        %    error('Data should be normalized between [-1,1]');
+        %end
     end
 
 %% |estimatedefault|
